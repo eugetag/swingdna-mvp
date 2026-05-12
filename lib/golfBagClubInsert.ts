@@ -2,6 +2,7 @@
  * Row shape for `public.golf_bag_clubs` inserts.
  * Column names must match Supabase exactly.
  */
+import { trimStringish } from "@/lib/trimStringish";
 export type GolfBagClubInsert = {
   user_id: string;
   club_type: string;
@@ -16,15 +17,15 @@ export type GolfBagClubInsert = {
   confidence_rating: number;
 };
 
-function parseOptionalNumeric(value: string): number | null {
-  const t = value.trim();
+function parseOptionalNumeric(value: unknown): number | null {
+  const t = trimStringish(value);
   if (t === "") return null;
   const n = Number.parseFloat(t);
   return Number.isFinite(n) ? n : null;
 }
 
-function nz(value: string): string {
-  return value.trim();
+function nz(value: unknown): string {
+  return trimStringish(value);
 }
 
 export function buildGolfBagClubInsert(input: {

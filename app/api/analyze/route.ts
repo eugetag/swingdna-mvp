@@ -22,7 +22,10 @@ export async function POST(request: Request) {
   }
 
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return jsonError("Expected a JSON object with optional keys: profile, bag, session, shots.", 400);
+    return jsonError(
+      "Expected a JSON object with optional keys: profile, bag, session, shots, swingPhasePhotos.",
+      400,
+    );
   }
 
   const payload = normalizeAnalyzePayload(body as Record<string, unknown>);

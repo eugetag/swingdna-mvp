@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoginRequiredNotice } from "@/components/login-required-notice";
+import { SwingDnaPositionsSection } from "@/components/swing-dna-positions";
 import { SiteNav } from "@/components/site-nav";
 import { getCurrentUserIdForWrite, useAuthUser } from "@/hooks/use-auth-user";
 import {
@@ -11,7 +13,9 @@ import {
   type LaunchSessionInsert,
   type LaunchShotInsert,
 } from "@/lib/launchSessionRows";
+import type { LaunchSessionRow, LaunchShotRow } from "@/lib/reportAnalytics";
 import { supabase } from "@/lib/supabaseClient";
+import { trimStringish } from "@/lib/trimStringish";
 
 type Environment = "indoor" | "outdoor";
 
@@ -206,6 +210,7 @@ function missLabel(id: MissDirectionId | ""): string {
 }
 
 export default function SessionsPage() {
+  const pathname = usePathname();
   const auth = useAuthUser();
   const [session, setSession] = useState<SessionMeta>(initialSession);
   const [shotDraft, setShotDraft] = useState<ShotDraft>(initialShot);
@@ -213,6 +218,12 @@ export default function SessionsPage() {
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [sessionHistory, setSessionHistory] = useState<
+    { session: LaunchSessionRow; shots: LaunchShotRow[] }[]
+  >([]);
+  const [sessionHistoryLoading, setSessionHistoryLoading] = useState(false);
+  const [sessionHistoryError, setSessionHistoryError] = useState<string | null>(null);
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
 
   const nextSequence = useMemo(() => shots.length + 1, [shots.length]);
 
@@ -250,11 +261,90 @@ export default function SessionsPage() {
     );
   }
 
+  const loadSessionHistory = useCallback(async () => {
+    if (auth.status !== "signed_in") {
+      setSessionHistory([]);
+      setSessionHistoryLoading(false);
+      return;
+    }
+    setSessionHistoryLoading(true);
+    setSessionHistoryError(null);
+    const uid = await getCurrentUserIdForWrite();
+    if (!uid) {
+      setSessionHistory([]);
+      setSessionHistoryLoading(false);
+      return;
+    }
+    const { data: sessions, error: sErr } = await supabase
+      .from("launch_sessions")
+      .select("*")
+      .eq("user_id", uid)
+      .order("created_at", { ascending: false })
+      .limit(25);
+    if (sErr) {
+      setSessionHistoryError(sErr.message);
+      setSessionHistory([]);
+      setSessionHistoryLoading(false);
+      return;
+    }
+    const list = (sessions ?? []) as LaunchSessionRow[];
+    if (list.length === 0) {
+      setSessionHistory([]);
+      setSessionHistoryLoading(false);
+      return;
+    }
+    const ids = list.map((s) => s.id);
+    const { data: shots, error: shErr } = await supabase
+      .from("launch_shots")
+      .select("*")
+      .eq("user_id", uid)
+      .in("session_id", ids);
+    if (shErr) {
+      setSessionHistoryError(shErr.message);
+      setSessionHistory([]);
+      setSessionHistoryLoading(false);
+      return;
+    }
+    const bySession = new Map<string, LaunchShotRow[]>();
+    for (const sh of (shots ?? []) as LaunchShotRow[]) {
+      const arr = bySession.get(sh.session_id) ?? [];
+      arr.push(sh);
+      bySession.set(sh.session_id, arr);
+    }
+    for (const arr of bySession.values()) {
+      arr.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    }
+    setSessionHistory(list.map((s) => ({ session: s, shots: bySession.get(s.id) ?? [] })));
+    setSessionHistoryLoading(false);
+  }, [auth.status]);
+
+  useEffect(() => {
+    void loadSessionHistory();
+  }, [loadSessionHistory]);
+
+  async function handleDeleteSavedSession(sessionId: string) {
+    if (!window.confirm("Delete this saved session and all shots stored for it?")) return;
+    const uid = await getCurrentUserIdForWrite();
+    if (!uid) return;
+    setSessionHistoryError(null);
+    const { error } = await supabase
+      .from("launch_sessions")
+      .delete()
+      .eq("id", sessionId)
+      .eq("user_id", uid);
+    if (error) {
+      setSessionHistoryError(error.message);
+      return;
+    }
+    if (expandedSessionId === sessionId) setExpandedSessionId(null);
+    await loadSessionHistory();
+  }
+
   async function handleSaveSessionToSupabase() {
     setSaveError(null);
     setSaveSuccess(false);
 
-    if (!session.title.trim()) {
+    if (!trimStringish(session.title)) {
       setSaveError("Add a session title before saving.");
       return;
     }
@@ -282,7 +372,7 @@ export default function SessionsPage() {
 
     try {
       const sessionBase = buildLaunchSessionInsert({
-        title: session.title.trim(),
+        title: trimStringish(session.title),
         date: session.date,
         environment: session.environment,
         launchMonitorLabel: lmLabel(session.launchMonitor),
@@ -335,6 +425,7 @@ export default function SessionsPage() {
       }
 
       setSaveSuccess(true);
+      await loadSessionHistory();
     } catch (err) {
       setSaveError(getErrorMessage(err));
       setSaveSuccess(false);
@@ -388,13 +479,44 @@ export default function SessionsPage() {
           <div className="mt-10 h-48 animate-pulse rounded-2xl border border-white/10 bg-white/[0.04]" aria-busy />
         ) : null}
         {auth.status === "signed_out" ? (
-          <div className="mt-10">
+          <div className="mt-10 space-y-6">
+            <section className="relative overflow-hidden rounded-2xl border border-sky-500/25 bg-gradient-to-b from-sky-500/[0.07] via-zinc-950/85 to-zinc-950 p-6 shadow-[0_0_48px_-24px_rgba(56,189,248,0.22)] sm:p-8">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-sky-400/40 to-transparent"
+              />
+              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-sky-300/90">SwingDNA</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-white">Swing phase photos</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-sky-100/70">
+                Sign in to upload and save one image per swing phase (setup through follow-through). Photos are stored
+                in your vault and used with launch data for Coach AI.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  href={`/login?next=${encodeURIComponent(pathname || "/sessions")}`}
+                  className="rounded-full bg-gradient-to-r from-sky-500 to-sky-600 px-5 py-2.5 text-sm font-semibold text-zinc-950 shadow-[0_0_24px_-8px_rgba(56,189,248,0.45)] transition hover:from-sky-400 hover:to-sky-500"
+                >
+                  Log in to save photos
+                </Link>
+                <Link
+                  href="/signup"
+                  className="rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-white/10"
+                >
+                  Sign up
+                </Link>
+              </div>
+            </section>
             <LoginRequiredNotice />
+            <p className="mt-4 text-center text-xs text-zinc-500">
+              Sign in to save sessions and to load your saved session history on this page.
+            </p>
           </div>
         ) : null}
 
         {auth.status === "signed_in" ? (
           <>
+        <SwingDnaPositionsSection />
+
         {/* Session header */}
         <section className="mt-10 rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-transparent p-6 sm:p-8">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -794,7 +916,7 @@ export default function SessionsPage() {
             <div>
               <h2 className="text-xl font-semibold tracking-tight text-white">Shot log</h2>
               <p className="mt-1 text-xs text-zinc-500">
-                {session.title.trim() || "Untitled session"}
+                {trimStringish(session.title) || "Untitled session"}
                 {session.launchMonitor ? ` · ${lmLabel(session.launchMonitor)}` : ""}
                 {session.date ? ` · ${session.date}` : ""}
               </p>
@@ -845,9 +967,9 @@ export default function SessionsPage() {
                       <StatRow label="Strike" value={strikeLabel(s.strikeQuality)} />
                       <StatRow label="Miss" value={missLabel(s.missDirection)} wide />
                     </div>
-                    {s.shotNotes.trim() ? (
+                    {trimStringish(s.shotNotes) ? (
                       <p className="mt-3 border-t border-white/5 pt-3 text-xs leading-relaxed text-zinc-400">
-                        {s.shotNotes.trim()}
+                        {trimStringish(s.shotNotes)}
                       </p>
                     ) : null}
                   </li>
@@ -901,7 +1023,7 @@ export default function SessionsPage() {
                         <td className="whitespace-nowrap px-4 py-3 text-zinc-300">{strikeLabel(s.strikeQuality)}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-zinc-300">{missLabel(s.missDirection)}</td>
                         <td className="max-w-[200px] px-4 py-3 text-xs text-zinc-400">
-                          {s.shotNotes.trim() || "—"}
+                          {trimStringish(s.shotNotes) || "—"}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <button
@@ -920,6 +1042,134 @@ export default function SessionsPage() {
             </>
           )}
         </section>
+
+        <section
+          className="mt-16 rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.05] to-zinc-950/70 p-6 sm:p-8"
+          aria-label="Saved sessions from Supabase"
+        >
+          <div className="border-b border-white/10 pb-4">
+            <h2 className="text-xl font-semibold tracking-tight text-white">Saved sessions</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Recent launch blocks stored for your account — expand a row to inspect shots.
+            </p>
+          </div>
+          {sessionHistoryLoading ? (
+            <div className="mt-8 h-36 animate-pulse rounded-xl border border-white/10 bg-white/[0.05]" aria-busy />
+          ) : sessionHistoryError ? (
+            <div
+              className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"
+              role="alert"
+            >
+              {sessionHistoryError}
+            </div>
+          ) : sessionHistory.length === 0 ? (
+            <p className="mt-8 text-sm text-zinc-500">
+              No saved sessions yet. When you save a block above, it appears here with its shots.
+            </p>
+          ) : (
+            <ul className="mt-6 space-y-3">
+              {sessionHistory.map(({ session: sv, shots: svShots }) => (
+                <li key={sv.id} className="overflow-hidden rounded-xl border border-white/10 bg-zinc-900/35">
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-white">
+                        {trimStringish(sv.session_title) || "Untitled session"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        {trimStringish(sv.session_date) || "—"} · {trimStringish(sv.environment) || "—"} ·{" "}
+                        {trimStringish(sv.launch_monitor) || "—"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedSessionId((cur) => (cur === sv.id ? null : sv.id))
+                        }
+                        className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-zinc-200 transition hover:border-emerald-500/35 hover:text-white"
+                      >
+                        {expandedSessionId === sv.id
+                          ? "Hide shots"
+                          : `View shots (${svShots.length})`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteSavedSession(sv.id)}
+                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-400 transition hover:border-red-500/40 hover:text-red-300"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  {expandedSessionId === sv.id ? (
+                    svShots.length === 0 ? (
+                      <p className="border-t border-white/5 px-4 py-4 text-sm text-zinc-500">
+                        No shots stored for this session.
+                      </p>
+                    ) : (
+                      <div className="border-t border-white/5 px-2 pb-4 pt-2">
+                        <div className="overflow-x-auto rounded-lg border border-white/5">
+                          <table className="min-w-full text-left text-xs text-zinc-200">
+                            <thead className="border-b border-white/10 bg-zinc-950/60 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                              <tr>
+                                <th className="whitespace-nowrap px-3 py-2">#</th>
+                                <th className="whitespace-nowrap px-3 py-2">Club</th>
+                                <th className="whitespace-nowrap px-3 py-2">Ball</th>
+                                <th className="whitespace-nowrap px-3 py-2">Club</th>
+                                <th className="whitespace-nowrap px-3 py-2">Sm</th>
+                                <th className="whitespace-nowrap px-3 py-2">Carry</th>
+                                <th className="whitespace-nowrap px-3 py-2">Tot</th>
+                                <th className="whitespace-nowrap px-3 py-2">Spin</th>
+                                <th className="whitespace-nowrap px-3 py-2">Shape</th>
+                                <th className="min-w-[120px] px-3 py-2">Notes</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5">
+                              {svShots.map((row, idx) => (
+                                <tr key={row.id} className="hover:bg-white/[0.02]">
+                                  <td className="whitespace-nowrap px-3 py-2 font-mono text-emerald-300/90">
+                                    {idx + 1}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 font-medium text-white">
+                                    {trimStringish(row.club_used) || "—"}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                                    {numCell(row.ball_speed)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                                    {numCell(row.club_speed)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                                    {numCell(row.smash_factor)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                                    {numCell(row.carry_distance)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                                    {numCell(row.total_distance)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                                    {numCell(row.spin_rate)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 text-zinc-300">
+                                    {trimStringish(row.shot_shape) || "—"}
+                                  </td>
+                                  <td className="max-w-[200px] px-3 py-2 text-zinc-400">
+                                    {trimStringish(row.notes) || "—"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
           </>
         ) : null}
       </main>
@@ -927,13 +1177,20 @@ export default function SessionsPage() {
   );
 }
 
-function fmt(v: string): string {
-  return v.trim() === "" ? "—" : v;
+function numCell(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return String(n);
 }
 
-function deg(v: string): string {
-  if (v.trim() === "") return "—";
-  return `${v}°`;
+function fmt(v: unknown): string {
+  const t = trimStringish(v);
+  return t === "" ? "—" : t;
+}
+
+function deg(v: unknown): string {
+  const t = trimStringish(v);
+  if (t === "") return "—";
+  return `${t}°`;
 }
 
 function StatRow({

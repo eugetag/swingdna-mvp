@@ -2,6 +2,7 @@
  * Inserts for `launch_sessions` and `launch_shots` — column names match Supabase schema.
  */
 
+import { trimStringish } from "@/lib/trimStringish";
 export type LaunchSessionInsert = {
   user_id: string;
   session_title: string | null;
@@ -59,15 +60,15 @@ export type ShotSnapshotForInsert = {
   shotNotes: string;
 };
 
-function parseOptionalNumeric(value: string): number | null {
-  const t = value.trim();
+function parseOptionalNumeric(value: unknown): number | null {
+  const t = trimStringish(value);
   if (t === "") return null;
   const n = Number.parseFloat(t);
   return Number.isFinite(n) ? n : null;
 }
 
-function emptyToNull(value: string): string | null {
-  const t = value.trim();
+function emptyToNull(value: unknown): string | null {
+  const t = trimStringish(value);
   return t === "" ? null : t;
 }
 
@@ -76,7 +77,7 @@ export function buildLaunchSessionInsert(meta: SessionSnapshotForInsert): Omit<L
     session_title: emptyToNull(meta.title),
     session_date: meta.date,
     environment: meta.environment,
-    launch_monitor: meta.launchMonitorLabel.trim(),
+    launch_monitor: trimStringish(meta.launchMonitorLabel),
     notes: emptyToNull(meta.notes),
   };
 }

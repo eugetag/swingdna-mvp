@@ -20,6 +20,7 @@ import {
   deriveWeakestScore,
   fetchReportBundle,
   hasAnyReportData,
+  profileHasMeasurementData,
   type GolfBagClubRow,
   type GolferProfileRow,
   type LaunchSessionRow,
@@ -27,7 +28,9 @@ import {
   type ReportBundle,
   sessionHighlightCards,
 } from "@/lib/reportAnalytics";
+import { formatBodyTypeLabel } from "@/lib/golferProfileInsert";
 import { supabase } from "@/lib/supabaseClient";
+import { trimStringish } from "@/lib/trimStringish";
 
 function getErrorMessage(error: unknown): string {
   if (error && typeof error === "object" && "message" in error) {
@@ -38,19 +41,23 @@ function getErrorMessage(error: unknown): string {
   return "Could not load report data.";
 }
 
-/** Normalize Supabase fields that may be string or numeric for display (never call .trim() on unknown DB types). */
-function toNonEmptyDisplayString(v: string | number | null | undefined): string | null {
+/** Normalize Supabase fields that may be string, number, or other JSON scalars for display. */
+function toNonEmptyDisplayString(v: unknown): string | null {
   if (v == null) return null;
-  if (typeof v === "number") return Number.isFinite(v) ? String(v) : null;
-  const s = v.trim();
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return null;
+    const s = String(v).trim();
+    return s ? s : null;
+  }
+  const s = trimStringish(v);
   return s ? s : null;
 }
 
-function optionalDash(v: string | number | null | undefined): string {
+function optionalDash(v: unknown): string {
   return toNonEmptyDisplayString(v) ?? "—";
 }
 
-function optionalFallback(v: string | number | null | undefined, fallback: string): string {
+function optionalFallback(v: unknown, fallback: string): string {
   return toNonEmptyDisplayString(v) ?? fallback;
 }
 
@@ -64,7 +71,7 @@ function fmt0(n: number | null | undefined): string {
   return Math.round(n).toString();
 }
 
-function fmtHand(h: string | number | null | undefined): string {
+function fmtHand(h: unknown): string {
   const raw = toNonEmptyDisplayString(h);
   if (!raw) return "—";
   return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
@@ -167,10 +174,7 @@ function isRecord(x: unknown): x is Record<string, unknown> {
 
 function asStringList(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
-  return v
-    .filter((x): x is string => typeof x === "string")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return v.map((x) => trimStringish(x)).filter(Boolean);
 }
 
 function parseApiInsightsPayload(json: unknown): GolfCoachInsights {
@@ -182,8 +186,7 @@ function parseApiInsightsPayload(json: unknown): GolfCoachInsights {
     throw new Error("Missing insights in response.");
   }
   return {
-    executiveSummary:
-      typeof insights.executiveSummary === "string" ? insights.executiveSummary.trim() : "",
+    executiveSummary: trimStringish(insights.executiveSummary),
     swingTendencies: asStringList(insights.swingTendencies),
     clubGappingObservations: asStringList(insights.clubGappingObservations),
     consistencyAnalysis: asStringList(insights.consistencyAnalysis),
@@ -303,6 +306,103 @@ function ProfileShowcase({
           </div>
         </Card>
       </div>
+    </section>
+  );
+}
+
+function MeasurementsShowcase({ profile }: { profile: GolferProfileRow | null }) {
+  const has = profileHasMeasurementData(profile);
+  return (
+    <section id="measurements" className="scroll-mt-24">
+      <div className="mb-4 border-b border-amber-500/20 pb-4">
+        <p className="text-xs font-semibold uppercase tracking-widest text-amber-200/90">Fitting lab</p>
+        <h2 className="mt-1 text-xl font-semibold tracking-tight text-white sm:text-2xl">Player measurements</h2>
+        <p className="mt-1 text-xs text-zinc-500">Anthropometrics & context from your saved profile</p>
+      </div>
+      {!profile ? (
+        <Card>
+          <p className="text-sm text-zinc-500">No profile loaded.</p>
+        </Card>
+      ) : !has ? (
+        <Card className="relative overflow-hidden border-amber-500/15 bg-gradient-to-br from-amber-500/[0.05] to-zinc-950/60">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-16 -top-16 h-36 w-36 rounded-full bg-amber-400/10 blur-3xl"
+          />
+          <p className="relative text-sm leading-relaxed text-zinc-400">
+            No measurements on file. Add your frame, lengths, and fitting notes on the{" "}
+            <Link href="/profile" className="font-medium text-amber-200/90 underline-offset-2 hover:underline">
+              Profile
+            </Link>{" "}
+            page to unlock richer equipment reads here and in Coach AI.
+          </p>
+        </Card>
+      ) : (
+        <div className="relative overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-b from-amber-500/[0.07] via-zinc-950/80 to-zinc-950 p-6 sm:p-8 shadow-[0_0_48px_-28px_rgba(251,191,36,0.22)]">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -left-20 top-0 h-48 w-48 rounded-full bg-amber-500/10 blur-3xl"
+          />
+          <div className="relative grid gap-8 lg:grid-cols-3">
+            <div className="space-y-4 lg:col-span-2">
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200/80">Frame</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ProfileStat label="Age">{profile.age != null ? fmt0(profile.age) : "—"}</ProfileStat>
+                <ProfileStat label="Height">
+                  {profile.height != null ? `${fmt1(profile.height)} in` : "—"}
+                </ProfileStat>
+                <ProfileStat label="Weight">
+                  {profile.weight != null ? `${fmt1(profile.weight)} lbs` : "—"}
+                </ProfileStat>
+                <ProfileStat label="Body type">{formatBodyTypeLabel(profile.body_type)}</ProfileStat>
+                <ProfileStat label="Flexibility (1–10)">
+                  {profile.flexibility_score != null ? String(profile.flexibility_score) : "—"}
+                </ProfileStat>
+              </div>
+              <h3 className="pt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200/80">
+                Fitting tape
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <ProfileStat label="Waist">
+                  {profile.waist_measurement != null ? `${fmt1(profile.waist_measurement)} in` : "—"}
+                </ProfileStat>
+                <ProfileStat label="Inseam">
+                  {profile.inseam != null ? `${fmt1(profile.inseam)} in` : "—"}
+                </ProfileStat>
+                <ProfileStat label="Arm length">
+                  {profile.arm_length != null ? `${fmt1(profile.arm_length)} in` : "—"}
+                </ProfileStat>
+                <ProfileStat label="Wrist-to-floor">
+                  {profile.wrist_to_floor != null ? `${fmt1(profile.wrist_to_floor)} in` : "—"}
+                </ProfileStat>
+                <ProfileStat label="Shoulder width">
+                  {profile.shoulder_width != null ? `${fmt1(profile.shoulder_width)} in` : "—"}
+                </ProfileStat>
+                <ProfileStat label="Shoe size (US)">{optionalDash(profile.shoe_size)}</ProfileStat>
+              </div>
+            </div>
+            <div className="flex flex-col gap-4 rounded-xl border border-white/10 bg-black/25 p-5">
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Context</h3>
+              <div className="flex-1 space-y-4 text-sm leading-relaxed text-zinc-300">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                    Athletic background
+                  </p>
+                  <p className="mt-1.5">{optionalFallback(profile.athletic_background, "—")}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Injury notes</p>
+                  <p className="mt-1.5">{optionalFallback(profile.injury_notes, "—")}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Fitting notes</p>
+                  <p className="mt-1.5">{optionalFallback(profile.fitting_notes, "—")}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -513,6 +613,10 @@ function DeveloperDebugPanel({
             <dt className="text-zinc-600">Shots found</dt>
             <dd className="mt-1 text-zinc-300">{bundle.sessionShots.length}</dd>
           </div>
+          <div>
+            <dt className="text-zinc-600">Swing phase photos</dt>
+            <dd className="mt-1 text-zinc-300">{bundle.swingPhasePhotos.length}</dd>
+          </div>
         </dl>
         {supabaseErrors.length > 0 ? (
           <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-amber-100/90">
@@ -615,6 +719,7 @@ const emptyReportBundle: ReportBundle = {
   bagClubs: [],
   latestSession: null,
   sessionShots: [],
+  swingPhasePhotos: [],
 };
 
 export default function ReportPage() {
@@ -680,7 +785,7 @@ export default function ReportPage() {
     setAiLoading(false);
     aiRequestGen.current += 1;
     aiAnalyzingRef.current = false;
-  }, [bundle?.latestSession?.id, bundle?.profile?.id]);
+  }, [bundle?.latestSession?.id, bundle?.profile?.id, bundle?.swingPhasePhotos?.length]);
 
   const runAnalyzeWithAi = useCallback(async () => {
     if (!bundle || aiAnalyzingRef.current) return;
@@ -697,6 +802,7 @@ export default function ReportPage() {
           bag: bundle.bagClubs,
           session: bundle.latestSession,
           shots: bundle.sessionShots,
+          swingPhasePhotos: bundle.swingPhasePhotos,
         }),
       });
       const json: unknown = await res.json().catch(() => null);
@@ -817,6 +923,7 @@ export default function ReportPage() {
           <>
             <div className="mb-12 space-y-14">
               <ProfileShowcase profile={bundle.profile} dnaRead={dnaRead} bagAvgConf={bagAvgConf} />
+              <MeasurementsShowcase profile={bundle.profile} />
               <BagShowcaseTable clubs={bundle.bagClubs} />
               <ShotsShowcaseTable
                 shots={bundle.sessionShots}
@@ -915,6 +1022,7 @@ export default function ReportPage() {
             >
               {[
                 ["profile", "Profile"],
+                ["measurements", "Measurements"],
                 ["bag", "Bag"],
                 ["shots", "Shots"],
                 ["metrics", "Metrics"],

@@ -1,12 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoginRequiredNotice } from "@/components/login-required-notice";
 import { SiteNav } from "@/components/site-nav";
 import { getCurrentUserIdForWrite, useAuthUser } from "@/hooks/use-auth-user";
 import { buildGolfBagClubInsert, type GolfBagClubInsert } from "@/lib/golfBagClubInsert";
+import {
+  BAG_CUSTOM_BRAND as CUSTOM_BRAND,
+  BAG_CUSTOM_LOFT as CUSTOM_LOFT,
+  BAG_CUSTOM_MODEL as CUSTOM_MODEL,
+  golfBagClubRowToDraft,
+} from "@/lib/golfBagClubFromRow";
+import type { GolfBagClubRow } from "@/lib/reportAnalytics";
 import { supabase } from "@/lib/supabaseClient";
+import { trimStringish } from "@/lib/trimStringish";
 import {
   CATEGORY_LABELS,
   CONFIDENCE_OPTIONS,
@@ -20,11 +28,6 @@ import {
   resolveModelLabel,
   SHOT_SHAPE_OPTIONS,
 } from "@/lib/golf-bag-catalog";
-
-/** Catalog picks use real IDs; sentinel rows unlock optional free-form details */
-const CUSTOM_BRAND = "__sdn_custom_brand__";
-const CUSTOM_MODEL = "__sdn_custom_model__";
-const CUSTOM_LOFT = "__sdn_custom_loft__";
 
 type FlexId = (typeof FLEX_OPTIONS)[number]["id"];
 type ShotShapeId = (typeof SHOT_SHAPE_OPTIONS)[number]["id"];
@@ -152,6 +155,9 @@ export default function BagPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [bagListLoading, setBagListLoading] = useState(false);
+  const [bagLoadError, setBagLoadError] = useState<string | null>(null);
+  const [editingClubId, setEditingClubId] = useState<string | null>(null);
 
   const brands = useMemo(() => {
     if (!draft.clubCategory) return [];
@@ -181,6 +187,57 @@ export default function BagPage() {
     setSaveError(null);
     setDraft((prev) => ({ ...prev, [key]: value }));
   }, []);
+
+  useEffect(() => {
+    if (auth.status !== "signed_in") {
+      setClubs([]);
+      setBagListLoading(false);
+      setBagLoadError(null);
+      setEditingClubId(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setBagListLoading(true);
+      setBagLoadError(null);
+      const uid = await getCurrentUserIdForWrite();
+      if (!uid || cancelled) {
+        if (!cancelled) setBagListLoading(false);
+        return;
+      }
+      const { data, error } = await supabase
+        .from("golf_bag_clubs")
+        .select("*")
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      if (error) {
+        setBagLoadError(error.message);
+        setClubs([]);
+      } else {
+        const rows = (data ?? []) as GolfBagClubRow[];
+        setClubs(rows.map((r) => ({ id: r.id, ...golfBagClubRowToDraft(r) })));
+      }
+      setBagListLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.status]);
+
+  function cancelEditClub() {
+    setEditingClubId(null);
+    setDraft(initialDraft);
+    setSaveError(null);
+  }
+
+  function startEditClub(c: BagClub) {
+    setSaveSuccess(false);
+    setSaveError(null);
+    const { id, ...rest } = c;
+    setDraft(rest);
+    setEditingClubId(id);
+  }
 
   function setClubCategory(next: BagClubCategory) {
     setSaveSuccess(false);
@@ -284,6 +341,23 @@ export default function BagPage() {
         shotShapeLabel: dashToEmpty(shapeDisplay),
         confidence: draft.confidence as number,
       });
+
+      if (editingClubId) {
+        const { error } = await supabase
+          .from("golf_bag_clubs")
+          .update(base)
+          .eq("id", editingClubId)
+          .eq("user_id", userId);
+        if (error) throw error;
+        setClubs((prev) =>
+          prev.map((c) => (c.id === editingClubId ? { ...draft, id: editingClubId } : c)),
+        );
+        setEditingClubId(null);
+        setDraft(initialDraft);
+        setSaveSuccess(true);
+        return;
+      }
+
       const row: GolfBagClubInsert = { ...base, user_id: userId };
 
       const { data, error } = await supabase
@@ -308,8 +382,25 @@ export default function BagPage() {
     }
   }
 
-  function removeClub(id: string) {
+  async function handleDeleteClub(id: string) {
+    setSaveError(null);
+    setSaveSuccess(false);
+    const userId = await getCurrentUserIdForWrite();
+    if (!userId) {
+      setSaveError("You need to be logged in to delete clubs.");
+      return;
+    }
+    const snapshot = clubs;
     setClubs((prev) => prev.filter((c) => c.id !== id));
+    if (editingClubId === id) {
+      setEditingClubId(null);
+      setDraft(initialDraft);
+    }
+    const { error } = await supabase.from("golf_bag_clubs").delete().eq("id", id).eq("user_id", userId);
+    if (error) {
+      setClubs(snapshot);
+      setSaveError(getErrorMessage(error));
+    }
   }
 
   function labelClub(c: BagClub) {
@@ -393,18 +484,32 @@ export default function BagPage() {
         {auth.status === "loading" ? (
           <div className="mt-10 h-40 animate-pulse rounded-2xl border border-white/10 bg-white/[0.04]" aria-busy />
         ) : auth.status === "signed_out" ? (
-          <div className="mt-10">
+          <div className="mt-10 space-y-3">
             <LoginRequiredNotice />
+            <p className="text-center text-xs text-zinc-500">
+              After you sign in, clubs you have already saved load here automatically.
+            </p>
           </div>
         ) : null}
 
         {auth.status === "signed_in" ? (
           <>
-        <form
-          onSubmit={handleAddClub}
-          className="mt-10 space-y-6 rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-transparent p-6 sm:p-8"
-        >
-          <h2 className="text-lg font-semibold text-white">Add a club</h2>
+            {bagLoadError ? (
+              <div
+                className="mt-8 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+                role="alert"
+              >
+                Could not load your saved bag: {bagLoadError}
+              </div>
+            ) : null}
+
+            <form
+              onSubmit={handleAddClub}
+              className="mt-10 space-y-6 rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-transparent p-6 sm:p-8"
+            >
+              <h2 className="text-lg font-semibold text-white">
+                {editingClubId ? "Edit club" : "Add a club"}
+              </h2>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             <div>
               <label htmlFor="club-type" className="mb-1.5 block text-xs font-medium text-zinc-400">
@@ -708,13 +813,24 @@ export default function BagPage() {
             </div>
           ) : null}
 
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 px-10 py-3 text-sm font-semibold text-zinc-950 shadow-[0_0_36px_rgba(16,185,129,0.28)] transition enabled:hover:from-emerald-400 enabled:hover:to-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSaving ? "Saving…" : "Add club to bag"}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={isSaving || bagListLoading}
+              className="rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 px-10 py-3 text-sm font-semibold text-zinc-950 shadow-[0_0_36px_rgba(16,185,129,0.28)] transition enabled:hover:from-emerald-400 enabled:hover:to-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? "Saving…" : editingClubId ? "Save changes" : "Add club to bag"}
+            </button>
+            {editingClubId ? (
+              <button
+                type="button"
+                onClick={cancelEditClub}
+                className="rounded-full border border-white/15 bg-white/5 px-6 py-3 text-sm font-medium text-zinc-200 transition hover:bg-white/10"
+              >
+                Cancel edit
+              </button>
+            ) : null}
+          </div>
         </form>
 
         {saveSuccess ? (
@@ -723,23 +839,32 @@ export default function BagPage() {
             role="status"
             aria-live="polite"
           >
-            Club saved to your bag in Supabase.
+            Saved to your bag in Supabase.
           </div>
-        ) : null}
-          </>
         ) : null}
 
         <section className="mt-14" aria-label="Saved clubs">
           <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-4">
             <h2 className="text-xl font-semibold tracking-tight text-white">Bag slots</h2>
-            <p className="text-sm text-zinc-500">{clubs.length} total</p>
+            <p className="text-sm text-zinc-500">
+              {bagListLoading ? "Loading…" : `${clubs.length} total`}
+            </p>
           </div>
 
-          {clubs.length === 0 ? (
+          {bagListLoading ? (
+            <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="h-56 animate-pulse rounded-2xl border border-white/10 bg-white/[0.05]"
+                  aria-hidden
+                />
+              ))}
+            </div>
+          ) : clubs.length === 0 ? (
             <div className="mt-10 rounded-2xl border border-dashed border-white/15 bg-zinc-900/20 px-6 py-16 text-center">
               <p className="text-sm text-zinc-400">
-                Your bag is empty. Add your driver, woods, irons, wedges, and putter to unlock gapping
-                context.
+                Your bag is empty. Add your driver, woods, irons, wedges, and putter to unlock gapping context.
               </p>
             </div>
           ) : (
@@ -752,13 +877,22 @@ export default function BagPage() {
                   <div className="mb-4 h-px w-10 bg-gradient-to-r from-emerald-400/80 to-transparent transition group-hover:w-14" />
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="text-lg font-semibold leading-snug text-white">{labelClub(c)}</h3>
-                    <button
-                      type="button"
-                      onClick={() => removeClub(c.id)}
-                      className="shrink-0 rounded-lg border border-white/10 px-2.5 py-1 text-xs font-medium text-zinc-400 transition hover:border-red-500/40 hover:text-red-300"
-                    >
-                      Remove
-                    </button>
+                    <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row sm:items-center">
+                      <button
+                        type="button"
+                        onClick={() => startEditClub(c)}
+                        className="rounded-lg border border-white/10 px-2.5 py-1 text-xs font-medium text-zinc-300 transition hover:border-emerald-500/40 hover:text-emerald-200"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteClub(c.id)}
+                        className="rounded-lg border border-white/10 px-2.5 py-1 text-xs font-medium text-zinc-400 transition hover:border-red-500/40 hover:text-red-300"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                   <dl className="mt-4 grid gap-3 text-sm">
                     <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
@@ -770,7 +904,7 @@ export default function BagPage() {
                     <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
                       <dt className="text-zinc-500">Shaft</dt>
                       <dd className="max-w-[60%] text-right text-zinc-200">
-                        {c.shaft.trim() || "—"}
+                        {trimStringish(c.shaft) || "—"}
                       </dd>
                     </div>
                     <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
@@ -806,6 +940,9 @@ export default function BagPage() {
             </ul>
           )}
         </section>
+          </>
+        ) : null}
+
       </main>
     </div>
   );

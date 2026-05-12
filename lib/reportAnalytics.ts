@@ -1,9 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SwingPhasePhotoRow } from "@/lib/swingPhasePhotos";
+import { trimStringish } from "@/lib/trimStringish";
 
 /** Rows as returned from Supabase (snake_case). */
 export type GolferProfileRow = {
   id: string;
   created_at: string;
+  updated_at?: string;
   user_id: string;
   name: string | null;
   handicap: string | null;
@@ -16,6 +19,20 @@ export type GolferProfileRow = {
   primary_goal: string | null;
   practice_frequency: string | null;
   notes: string | null;
+  age: number | null;
+  height: number | null;
+  weight: number | null;
+  body_type: string | null;
+  flexibility_score: number | null;
+  waist_measurement: number | null;
+  inseam: number | null;
+  arm_length: number | null;
+  wrist_to_floor: number | null;
+  shoulder_width: number | null;
+  shoe_size: string | null;
+  athletic_background: string | null;
+  injury_notes: string | null;
+  fitting_notes: string | null;
 };
 
 export type GolfBagClubRow = {
@@ -73,7 +90,27 @@ export type ReportBundle = {
   bagClubs: GolfBagClubRow[];
   latestSession: LaunchSessionRow | null;
   sessionShots: LaunchShotRow[];
+  swingPhasePhotos: SwingPhasePhotoRow[];
 };
+
+/** True when any player-measurement column is populated (for report / AI hints). */
+export function profileHasMeasurementData(p: GolferProfileRow | null): boolean {
+  if (!p) return false;
+  const nums: (number | null | undefined)[] = [
+    p.age,
+    p.height,
+    p.weight,
+    p.flexibility_score,
+    p.waist_measurement,
+    p.inseam,
+    p.arm_length,
+    p.wrist_to_floor,
+    p.shoulder_width,
+  ];
+  if (nums.some((x) => x != null && Number.isFinite(Number(x)))) return true;
+  const strs = [p.body_type, p.shoe_size, p.athletic_background, p.injury_notes, p.fitting_notes];
+  return strs.some((s) => trimStringish(s) !== "");
+}
 
 export type SessionAggregates = {
   shotCount: number;
@@ -105,12 +142,12 @@ export function humanizeToken(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function modeString(values: (string | null)[]): string | null {
-  const filtered = values.filter((v): v is string => v != null && String(v).trim() !== "");
+function modeString(values: (string | number | null | undefined)[]): string | null {
+  const filtered = values.filter((v) => trimStringish(v) !== "");
   if (filtered.length === 0) return null;
   const counts = new Map<string, number>();
   for (const v of filtered) {
-    const k = v.trim();
+    const k = trimStringish(v);
     counts.set(k, (counts.get(k) ?? 0) + 1);
   }
   let best: string | null = null;
@@ -134,7 +171,7 @@ export function computeSessionAggregates(shots: LaunchShotRow[]): SessionAggrega
 
   const byClub = new Map<string, number[]>();
   for (const s of shots) {
-    const c = s.club_used?.trim();
+    const c = trimStringish(s.club_used);
     if (!c) continue;
     const cd = s.carry_distance;
     if (cd == null || !Number.isFinite(cd)) continue;
@@ -435,7 +472,7 @@ export function buildPracticePriorities(
       rank: out.length + 1,
       title: `Progress toward: ${goalLabel}`,
       detail:
-        profile.practice_frequency?.trim() ||
+        trimStringish(profile.practice_frequency) ||
         "Match practice volume to your stated goal — short frequent blocks beat rare marathon sessions.",
     });
   }
@@ -532,8 +569,16 @@ export async function fetchReportBundle(
     else sessionShots = (shotRows ?? []) as LaunchShotRow[];
   }
 
+  const { data: photoRows, error: photosErr } = await client
+    .from("swing_phase_photos")
+    .select("*")
+    .eq("user_id", userId)
+    .order("phase_name", { ascending: true });
+  if (photosErr) supabaseErrors.push(`swing_phase_photos: ${photosErr.message}`);
+  const swingPhasePhotos = (photoRows ?? []) as SwingPhasePhotoRow[];
+
   return {
-    bundle: { profile, bagClubs, latestSession, sessionShots },
+    bundle: { profile, bagClubs, latestSession, sessionShots, swingPhasePhotos },
     supabaseErrors,
   };
 }
@@ -543,7 +588,8 @@ export function hasAnyReportData(bundle: ReportBundle): boolean {
     bundle.profile != null ||
     bundle.bagClubs.length > 0 ||
     bundle.latestSession != null ||
-    bundle.sessionShots.length > 0
+    bundle.sessionShots.length > 0 ||
+    bundle.swingPhasePhotos.length > 0
   );
 }
 
@@ -568,6 +614,9 @@ export function buildDnaRead(
   }
   if (profile?.primary_goal) {
     parts.push(`Primary stated goal: ${humanizeToken(profile.primary_goal)}.`);
+  }
+  if (profile && profileHasMeasurementData(profile)) {
+    parts.push("Saved fitting measurements add depth for equipment and movement reads.");
   }
   if (parts.length === 0) {
     return "Log profile, bag carries, and a mixed LM session to unlock a richer SwingDNA read.";
