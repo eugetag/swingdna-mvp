@@ -208,53 +208,87 @@ function HeroDashboardMockup() {
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
           </span>
-          <span className="text-xs font-medium text-emerald-200/90">Analyzer running</span>
+          <span className="text-xs font-medium text-emerald-200/90">Coach brief ready</span>
         </div>
       </div>
     </div>
   );
 }
 
-function FakeAnalyzerPanel({ variant }: { variant: "a" | "b" }) {
-  const lines =
-    variant === "a"
-      ? [
-          { dim: false, text: "→ fusion: launch_monitor + swing_phases [OK]" },
-          { dim: true, text: "  session_id: lm_2025_04_18_range_01" },
-          { dim: false, text: "→ golfer_context: wrist_floor 35\" | mobility: thoracic B+" },
-          { dim: false, text: "→ fault_rank: #1 early_extension (pressure_index 0.78)" },
-          { dim: true, text: "  evidence: P6–P7 shaft shallow vs baseline -2.1°" },
-          { dim: false, text: "→ gapping: gap_125_155_yds [healthy] | 4i vs 4h [recommend hybrid firm]" },
-          { dim: false, text: "→ practice_block: 20min | tempo_wedges + exit_path_gate" },
-        ]
-      : [
-          { dim: false, text: "→ caddie_mode: on_course | wind: L→R 6mph" },
-          { dim: true, text: "  target: pin_high_right | club_suggestion: 8i" },
-          { dim: false, text: "→ dispersion_model: tighten 3yds vs 14d avg (confidence 0.82)" },
-          { dim: false, text: "→ strategy: favor center_green — short_right dead" },
-          { dim: true, text: "  historical_miss: push_block 12% this round" },
-          { dim: false, text: "→ output: coach_narrative + yardage_book_patch [queued]" },
-        ];
+function DemoReportPreview() {
+  const sectionShell =
+    "rounded-2xl border border-white/[0.07] bg-gradient-to-b from-white/[0.04] to-zinc-950/60 p-5 sm:p-6";
+  const eyebrow = "text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-400/85";
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#07080a] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]" />
-          <span className="font-mono text-[11px] text-zinc-500">swingdna-analyze</span>
-          <span className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
-            v2.4
+    <div className="relative overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-gradient-to-b from-zinc-900/90 via-zinc-950 to-zinc-950 p-1 shadow-[0_24px_80px_-28px_rgba(0,0,0,0.75)]">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_0%,rgba(16,185,129,0.08),transparent_55%)]"
+      />
+      <div className="relative p-5 sm:p-7">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-5">
+          <div>
+            <p className={eyebrow}>Demo report</p>
+            <p className="mt-1.5 text-lg font-semibold tracking-tight text-white sm:text-xl">
+              Your performance brief
+            </p>
+          </div>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+            Sample data
           </span>
         </div>
-        <span className="font-mono text-[10px] text-emerald-500/80">streaming</span>
-      </div>
-      <div className="max-h-[220px] overflow-hidden p-4 font-mono text-[11px] leading-relaxed sm:max-h-[260px] sm:text-xs">
-        {lines.map((line, i) => (
-          <p key={i} className={line.dim ? "text-zinc-600" : "text-zinc-400"}>
-            <span className="text-emerald-500/50">›</span> {line.text}
-          </p>
-        ))}
-        <p className="mt-2 animate-pulse text-emerald-400/70">▌</p>
+
+        <div className="mt-6 space-y-5">
+          <section className={sectionShell}>
+            <h3 className={eyebrow}>Player snapshot</h3>
+            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+              {[
+                { label: "Handicap", value: "12" },
+                { label: "Common miss", value: "Push fade" },
+                { label: "Driver carry", value: "260 yards" },
+                { label: "Primary goal", value: "Lower scores" },
+              ].map((row) => (
+                <div key={row.label} className="rounded-xl border border-white/[0.05] bg-black/25 px-4 py-3">
+                  <dt className="text-[11px] font-medium text-zinc-500">{row.label}</dt>
+                  <dd className="mt-1 text-sm font-medium text-white">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
+          <section className={sectionShell}>
+            <h3 className={eyebrow}>AI swing insight</h3>
+            <p className="mt-4 text-sm leading-relaxed text-zinc-300 sm:text-[15px]">
+              Your swing pattern suggests your miss appears when your lower body stalls and the face stays slightly
+              open through impact.
+            </p>
+          </section>
+
+          <section className={sectionShell}>
+            <h3 className={eyebrow}>Club gapping insight</h3>
+            <p className="mt-4 text-sm leading-relaxed text-zinc-300 sm:text-[15px]">
+              Your 7 iron carry range is strong, but there is a scoring gap between 125–155 yards that should be
+              addressed with wedge and short iron practice.
+            </p>
+          </section>
+
+          <section className={sectionShell}>
+            <h3 className={eyebrow}>Practice plan</h3>
+            <p className="mt-4 text-sm leading-relaxed text-zinc-300 sm:text-[15px]">
+              This week: 20 minutes of tempo wedges, 15 minutes of start-line gates, and 10 minutes of half-swing
+              contact drills.
+            </p>
+          </section>
+
+          <section className="rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/[0.08] via-zinc-950/80 to-zinc-950 p-5 sm:p-6">
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-200/85">AI caddie preview</h3>
+            <p className="mt-4 text-sm leading-relaxed text-zinc-200 sm:text-[15px]">
+              On-course, SwingDNA would recommend aiming center-green when your push-fade miss brings short-right
+              trouble into play.
+            </p>
+          </section>
+        </div>
       </div>
     </div>
   );
@@ -308,7 +342,7 @@ export default function HowItWorksPage() {
                     Request access
                   </OpenBetaSignupButton>
                   <Link
-                    href="#demo-report"
+                    href="/demo-report"
                     className="inline-flex h-12 min-w-[180px] items-center justify-center rounded-full border border-white/15 bg-white/[0.04] px-8 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-white/[0.08]"
                   >
                     View demo report
@@ -426,12 +460,19 @@ export default function HowItWorksPage() {
                   </Link>
                 </div>
               </div>
-              <div className="space-y-5">
-                <p className="text-center text-[10px] font-semibold uppercase tracking-[0.3em] text-zinc-600 sm:text-left">
-                  Simulated analyzer output
+              <div className="lg:sticky lg:top-28">
+                <p className="text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-500 sm:text-left">
+                  Sample brief
                 </p>
-                <FakeAnalyzerPanel variant="a" />
-                <FakeAnalyzerPanel variant="b" />
+                <div className="mt-4 flex flex-col items-center gap-3 sm:items-start">
+                  <DemoReportPreview />
+                  <Link
+                    href="/demo-report"
+                    className="text-sm font-medium text-emerald-400/90 underline-offset-4 transition hover:text-emerald-300 hover:underline"
+                  >
+                    Open full-screen demo report →
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
