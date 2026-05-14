@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { OpenBetaSignupButton } from "@/components/founding-golfer-beta/open-beta-signup-button";
+import { SubscriptionPricingSection } from "@/components/subscription/subscription-pricing-section";
 import { SiteNav } from "@/components/site-nav";
 
 export const metadata: Metadata = {
@@ -53,37 +55,6 @@ const steps = [
   },
 ];
 
-const plans = [
-  {
-    name: "Player",
-    price: "$29",
-    period: "/mo",
-    blurb: "For dedicated amateurs dialing in one club at a time.",
-    highlights: ["5 swing analyses / mo", "Launch monitor import", "Practice plan builder"],
-    featured: false,
-  },
-  {
-    name: "Competitor",
-    price: "$79",
-    period: "/mo",
-    blurb: "For tournament golfers who want the full bag and gapping picture.",
-    highlights: [
-      "Unlimited video + LM fusion",
-      "Club gapping optimizer",
-      "Priority model refresh",
-    ],
-    featured: true,
-  },
-  {
-    name: "Academy",
-    price: "Custom",
-    period: "",
-    blurb: "For coaches and facilities training rosters at scale.",
-    highlights: ["Multi-athlete workspace", "White-label reports", "API & integrations"],
-    featured: false,
-  },
-];
-
 export default function Home() {
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-zinc-950 text-zinc-100">
@@ -97,46 +68,16 @@ export default function Home() {
       />
 
       <header className="border-b border-white/5 bg-zinc-950/70 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400/90 to-emerald-700/80 text-sm font-semibold tracking-tight text-zinc-950 shadow-[0_0_24px_rgba(52,211,153,0.35)]">
+        <div className="mx-auto flex min-w-0 max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <Link href="/" className="flex shrink-0 items-center gap-2">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400/90 to-emerald-700/80 text-sm font-semibold tracking-tight text-zinc-950 shadow-[0_0_24px_rgba(52,211,153,0.35)]">
               S
             </span>
             <span className="font-semibold tracking-tight text-white">
               Swing<span className="text-emerald-400/90">DNA</span>
             </span>
           </Link>
-          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 md:gap-x-8">
-            <SiteNav />
-            <nav
-              className="hidden items-center gap-8 text-sm text-zinc-400 md:flex"
-              aria-label="Page sections"
-            >
-              <a href="#features" className="transition hover:text-white">
-                Features
-              </a>
-              <a href="#how" className="transition hover:text-white">
-                How it works
-              </a>
-              <a href="#pricing" className="transition hover:text-white">
-                Pricing
-              </a>
-            </nav>
-          </div>
-          <div className="flex shrink-0 items-center gap-3">
-              <Link
-                href="/bag"
-              className="hidden text-sm text-zinc-400 transition hover:text-white sm:inline"
-            >
-                Manage bag
-              </Link>
-            <a
-              href="#cta"
-              className="rounded-full bg-white px-4 py-2 text-sm font-medium text-zinc-950 shadow-sm transition hover:bg-zinc-100"
-            >
-              Request access
-            </a>
-          </div>
+          <SiteNav />
         </div>
       </header>
 
@@ -265,67 +206,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Pricing preview */}
-        <section
-          id="pricing"
-          className="scroll-mt-20 border-t border-white/5 bg-gradient-to-b from-zinc-900/30 to-zinc-950 px-4 py-20 sm:px-6 lg:px-8"
-        >
-          <div className="mx-auto max-w-6xl">
-            <div className="text-center">
-              <h2 className="text-sm font-semibold uppercase tracking-widest text-emerald-400/90">Pricing</h2>
-              <p className="mx-auto mt-3 max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                Invest like your handicap depends on it — because it does.
-              </p>
-              <p className="mx-auto mt-4 max-w-lg text-sm text-zinc-400">
-                Preview rates for individuals. Annual billing saves two months on Player and Competitor.
-              </p>
-            </div>
-            <div className="mt-14 grid gap-6 lg:grid-cols-3">
-              {plans.map((p) => (
-                <div
-                  key={p.name}
-                  className={
-                    p.featured
-                      ? "relative flex flex-col rounded-2xl border border-emerald-500/40 bg-gradient-to-b from-emerald-500/10 to-zinc-950/80 p-8 shadow-[0_0_60px_rgba(16,185,129,0.12)]"
-                      : "flex flex-col rounded-2xl border border-white/10 bg-zinc-900/25 p-8"
-                  }
-                >
-                  {p.featured ? (
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-emerald-500 px-3 py-0.5 text-xs font-semibold text-zinc-950">
-                      Most popular
-                    </span>
-                  ) : null}
-                  <h3 className="text-lg font-semibold text-white">{p.name}</h3>
-                  <p className="mt-2 text-sm text-zinc-400">{p.blurb}</p>
-                  <p className="mt-6 flex items-baseline gap-1">
-                    <span className="text-4xl font-semibold tracking-tight text-white">{p.price}</span>
-                    {p.period ? (
-                      <span className="text-sm text-zinc-500">{p.period}</span>
-                    ) : null}
-                  </p>
-                  <ul className="mt-8 flex flex-1 flex-col gap-3 text-sm text-zinc-300">
-                    {p.highlights.map((h) => (
-                      <li key={h} className="flex gap-2">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/80" />
-                        {h}
-                      </li>
-                    ))}
-                  </ul>
-                  <a
-                    href="#cta"
-                    className={
-                      p.featured
-                        ? "mt-8 inline-flex h-11 items-center justify-center rounded-full bg-white text-sm font-semibold text-zinc-950 transition hover:bg-zinc-100"
-                        : "mt-8 inline-flex h-11 items-center justify-center rounded-full border border-white/15 bg-white/5 text-sm font-medium text-white transition hover:border-white/25 hover:bg-white/10"
-                    }
-                  >
-                    {p.name === "Academy" ? "Talk to us" : "Join waitlist"}
-                  </a>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+        <SubscriptionPricingSection />
 
         {/* CTA */}
         <section
@@ -346,16 +227,13 @@ export default function Home() {
                 Ready to see your swing the way the data does?
               </h2>
               <p className="relative mx-auto mt-4 max-w-xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-                We are onboarding a limited cohort of committed players and coaches. Request access and we will
-                match you to the right workspace.
+                We are onboarding a limited cohort of committed players and coaches. Join the Founding Golfer Beta and
+                we will match you to the right workspace.
               </p>
               <div className="relative mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <a
-                  href="mailto:hello@swingdna.app"
-                  className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 px-8 text-sm font-semibold text-zinc-950 shadow-[0_0_40px_rgba(16,185,129,0.3)] transition hover:from-emerald-400 hover:to-emerald-500"
-                >
+                <OpenBetaSignupButton className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 px-8 text-sm font-semibold text-zinc-950 shadow-[0_0_40px_rgba(16,185,129,0.3)] transition hover:from-emerald-400 hover:to-emerald-500">
                   Request access
-                </a>
+                </OpenBetaSignupButton>
                 <a
                   href="#features"
                   className="text-sm font-medium text-zinc-400 underline-offset-4 transition hover:text-white hover:underline"

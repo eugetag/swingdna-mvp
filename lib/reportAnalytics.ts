@@ -33,6 +33,10 @@ export type GolferProfileRow = {
   athletic_background: string | null;
   injury_notes: string | null;
   fitting_notes: string | null;
+  subscription_tier?: string | null;
+  advanced_ai_analysis_count?: number | null;
+  swing_analysis_count?: number | null;
+  ai_usage_month_key?: string | null;
 };
 
 export type GolfBagClubRow = {

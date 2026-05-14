@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoginRequiredNotice } from "@/components/login-required-notice";
 import { SiteNav } from "@/components/site-nav";
+import { UpgradePrompt } from "@/components/subscription/upgrade-prompt";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import type { GolfCoachInsights } from "@/lib/golfCoachAnalysis";
 import {
@@ -29,6 +30,7 @@ import {
   sessionHighlightCards,
 } from "@/lib/reportAnalytics";
 import { formatBodyTypeLabel } from "@/lib/golferProfileInsert";
+import { getUsageSnapshotFromProfile, incrementAdvancedAiAnalysis } from "@/lib/subscriptionUsage";
 import { supabase } from "@/lib/supabaseClient";
 import { trimStringish } from "@/lib/trimStringish";
 
@@ -787,8 +789,27 @@ export default function ReportPage() {
     aiAnalyzingRef.current = false;
   }, [bundle?.latestSession?.id, bundle?.profile?.id, bundle?.swingPhasePhotos?.length]);
 
+  const usageSnapshot = useMemo(() => {
+    if (!bundle?.profile) return null;
+    return getUsageSnapshotFromProfile(bundle.profile);
+  }, [
+    bundle?.profile?.id,
+    bundle?.profile?.subscription_tier,
+    bundle?.profile?.advanced_ai_analysis_count,
+    bundle?.profile?.swing_analysis_count,
+    bundle?.profile?.ai_usage_month_key,
+  ]);
+
   const runAnalyzeWithAi = useCallback(async () => {
+    const authUserId = auth.status === "signed_in" ? auth.userId : null;
     if (!bundle || aiAnalyzingRef.current) return;
+    if (bundle.profile) {
+      const snap = getUsageSnapshotFromProfile(bundle.profile);
+      if (!snap.canRunAdvancedAi) {
+        aiAnalyzingRef.current = false;
+        return;
+      }
+    }
     aiAnalyzingRef.current = true;
     const gen = ++aiRequestGen.current;
     setAiLoading(true);
@@ -817,6 +838,18 @@ export default function ReportPage() {
       if (aiRequestGen.current === gen) {
         setAiInsights(insights);
       }
+      if (authUserId && bundle.profile) {
+        const inc = await incrementAdvancedAiAnalysis(supabase, authUserId);
+        if (inc.ok) {
+          const { bundle: nextBundle, supabaseErrors: sb2 } = await fetchReportBundle(supabase, authUserId);
+          if (aiRequestGen.current === gen) {
+            setBundle(nextBundle);
+            if (sb2.length) {
+              setSupabaseErrors((prev) => Array.from(new Set([...prev, ...sb2])));
+            }
+          }
+        }
+      }
     } catch (e) {
       if (aiRequestGen.current === gen) {
         setAiInsights(null);
@@ -828,7 +861,7 @@ export default function ReportPage() {
         setAiLoading(false);
       }
     }
-  }, [bundle]);
+  }, [bundle, auth]);
 
   const agg = useMemo(
     () => computeSessionAggregates(bundle?.sessionShots ?? []),
@@ -888,9 +921,9 @@ export default function ReportPage() {
       <Shell />
 
       <header className="border-b border-white/5 bg-zinc-950/70 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400/90 to-emerald-700/80 text-sm font-semibold tracking-tight text-zinc-950 shadow-[0_0_24px_rgba(52,211,153,0.35)]">
+        <div className="mx-auto flex min-w-0 max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <Link href="/" className="flex shrink-0 items-center gap-2">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400/90 to-emerald-700/80 text-sm font-semibold tracking-tight text-zinc-950 shadow-[0_0_24px_rgba(52,211,153,0.35)]">
               S
             </span>
             <span className="font-semibold tracking-tight text-white">
@@ -932,14 +965,40 @@ export default function ReportPage() {
               <CalculatedMetricsBlock agg={agg} />
             </div>
 
+            {usageSnapshot && bundle.profile && !usageSnapshot.canRunAdvancedAi ? (
+              <div className="mb-6">
+                <UpgradePrompt kind="advanced-ai" />
+              </div>
+            ) : null}
+
             <div className="mb-10 flex flex-col gap-4 rounded-2xl border border-white/10 bg-zinc-900/40 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-              <p className="text-sm leading-relaxed text-zinc-400">
-                Get a Tour-level coach read on the profile, bag, and session data loaded above.
-              </p>
+              <div className="min-w-0">
+                <p className="text-sm leading-relaxed text-zinc-400">
+                  Get a Tour-level coach read on the profile, bag, and session data loaded above.
+                </p>
+                {usageSnapshot && bundle.profile ? (
+                  <p className="mt-2 text-xs text-zinc-500">
+                    Advanced AI this month:{" "}
+                    {usageSnapshot.advancedLimit == null ? (
+                      <span className="text-emerald-400/90">unlimited</span>
+                    ) : (
+                      <>
+                        <span className="tabular-nums text-zinc-300">
+                          {usageSnapshot.advancedUsed}/{usageSnapshot.advancedLimit}
+                        </span>
+                        <span className="text-zinc-600"> · Resets UTC monthly</span>
+                      </>
+                    )}
+                  </p>
+                ) : null}
+              </div>
               <button
                 type="button"
                 onClick={() => void runAnalyzeWithAi()}
-                disabled={aiLoading}
+                disabled={
+                  aiLoading ||
+                  Boolean(usageSnapshot && bundle.profile && !usageSnapshot.canRunAdvancedAi)
+                }
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-amber-400/35 bg-gradient-to-r from-amber-500/20 to-amber-600/10 px-5 py-2.5 text-sm font-semibold text-amber-100 shadow-[0_0_28px_-8px_rgba(251,191,36,0.45)] transition hover:border-amber-300/50 hover:from-amber-500/30 hover:text-white disabled:pointer-events-none disabled:opacity-50"
               >
                 {aiLoading ? (

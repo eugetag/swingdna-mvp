@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { UpgradePrompt } from "@/components/subscription/upgrade-prompt";
 import { getCurrentUserIdForWrite } from "@/hooks/use-auth-user";
+import type { GolferProfileRow } from "@/lib/reportAnalytics";
 import { supabase } from "@/lib/supabaseClient";
+import { getUsageSnapshotFromProfile, incrementSwingAnalysis } from "@/lib/subscriptionUsage";
 import {
   buildSwingPhotoStoragePath,
   SWING_PHASE_LABELS,
@@ -45,6 +48,9 @@ export function SwingDnaPositionsSection() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploadingPhase, setUploadingPhase] = useState<SwingPhaseName | null>(null);
   const [phaseErrors, setPhaseErrors] = useState<Partial<Record<SwingPhaseName, string>>>({});
+  const [swingUsageSnapshot, setSwingUsageSnapshot] = useState<ReturnType<typeof getUsageSnapshotFromProfile> | null>(
+    null,
+  );
 
   const rowByPhase = useMemo(() => {
     const m = new Map<SwingPhaseName, SwingPhasePhotoRow>();
@@ -53,6 +59,21 @@ export function SwingDnaPositionsSection() {
     }
     return m;
   }, [rows]);
+
+  const loadSwingUsage = useCallback(async (uid: string) => {
+    const { data, error } = await supabase
+      .from("golfer_profiles")
+      .select("subscription_tier, advanced_ai_analysis_count, swing_analysis_count, ai_usage_month_key")
+      .eq("user_id", uid)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) {
+      setSwingUsageSnapshot(null);
+      return;
+    }
+    setSwingUsageSnapshot(getUsageSnapshotFromProfile(data as GolferProfileRow));
+  }, []);
 
   const loadRowsForUser = useCallback(async (uid: string) => {
     setLoadError(null);
@@ -92,12 +113,13 @@ export function SwingDnaPositionsSection() {
         return;
       }
       await loadRowsForUser(uid);
+      await loadSwingUsage(uid);
       if (!cancelled) setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [loadRowsForUser]);
+  }, [loadRowsForUser, loadSwingUsage]);
 
   async function handleFile(phase: SwingPhaseName, file: File | null) {
     if (!file) return;
@@ -115,6 +137,25 @@ export function SwingDnaPositionsSection() {
         [phase]: "Use JPEG, PNG, WebP, or GIF under 8 MB.",
       }));
       return;
+    }
+
+    const { data: usageRow, error: usageErr } = await supabase
+      .from("golfer_profiles")
+      .select("subscription_tier, advanced_ai_analysis_count, swing_analysis_count, ai_usage_month_key")
+      .eq("user_id", uid)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!usageErr && usageRow) {
+      const snap = getUsageSnapshotFromProfile(usageRow as GolferProfileRow);
+      if (!snap.canRunSwingAnalysis) {
+        setPhaseErrors((e) => ({
+          ...e,
+          [phase]: "Monthly swing analysis limit reached. Upgrade under Membership on the home page.",
+        }));
+        return;
+      }
     }
 
     setUploadingPhase(phase);
@@ -141,7 +182,12 @@ export function SwingDnaPositionsSection() {
       );
       if (dbErr) throw dbErr;
 
+      const inc = await incrementSwingAnalysis(supabase, uid);
+      if (!inc.ok) {
+        console.warn("[swing usage]", inc.error);
+      }
       await loadRowsForUser(uid);
+      await loadSwingUsage(uid);
     } catch (err) {
       setPhaseErrors((e) => ({ ...e, [phase]: getErrorMessage(err) }));
     } finally {
@@ -222,9 +268,27 @@ export function SwingDnaPositionsSection() {
             <p className="mt-1 max-w-2xl text-xs leading-relaxed text-sky-100/65">
               One frame per phase — DTL or face-on. Uploads sync to your vault and feed Coach AI alongside LM data.
             </p>
+            {swingUsageSnapshot ? (
+              <p className="mt-2 text-[11px] text-zinc-500">
+                Swing analyses this month:{" "}
+                {swingUsageSnapshot.swingLimit == null ? (
+                  <span className="text-emerald-400/90">unlimited</span>
+                ) : (
+                  <span className="tabular-nums text-zinc-300">
+                    {swingUsageSnapshot.swingUsed}/{swingUsageSnapshot.swingLimit}
+                  </span>
+                )}
+                <span className="text-zinc-600"> · UTC</span>
+              </p>
+            ) : null}
           </div>
         </div>
 
+        {swingUsageSnapshot && !swingUsageSnapshot.canRunSwingAnalysis ? (
+          <div className="mb-6">
+            <UpgradePrompt kind="swing-analysis" />
+          </div>
+        ) : null}
         {loadError ? (
           <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
             {loadError}
@@ -287,7 +351,7 @@ export function SwingDnaPositionsSection() {
                     <input
                       type="file"
                       accept="image/jpeg,image/png,image/webp,image/gif"
-                      disabled={busy}
+                      disabled={busy || Boolean(swingUsageSnapshot && !swingUsageSnapshot.canRunSwingAnalysis)}
                       className="block w-full cursor-pointer text-xs text-zinc-400 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-sky-500/20 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-sky-100 hover:file:bg-sky-500/30"
                       onChange={(e) => {
                         const f = e.target.files?.[0] ?? null;
